@@ -1,0 +1,252 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  MEMBER
+  VIEWER
+}
+
+enum PolicyStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AcknowledgementStatus {
+  PENDING
+  ACKNOWLEDGED
+}
+
+enum IncidentStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  CLOSED
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Workspace {
+  id           String        @id @default(cuid())
+  name         String
+  slug         String        @unique
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  users        User[]
+  policies     Policy[]
+  approvals    Approval[]
+  incidents    Incident[]
+  attachments  Attachment[]
+  activityLogs ActivityLog[]
+  acknowledgements Acknowledgement[]
+}
+
+model User {
+  id           String      @id @default(cuid())
+  name         String
+  email        String      @unique
+  role         UserRole
+  workspaceId  String
+  workspace    Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  authoredPolicyVersions PolicyVersion[] @relation("PolicyVersionAuthor")
+  approvedPolicyVersions PolicyVersion[] @relation("PolicyVersionApprover")
+  requestedApprovals Approval[] @relation("ApprovalRequester")
+  assignedApprovals Approval[] @relation("ApprovalApprover")
+  assignedAcknowledgements Acknowledgement[] @relation("AcknowledgementAssignee")
+  reportedIncidents Incident[] @relation("IncidentReporter")
+  assignedIncidents Incident[] @relation("IncidentAssignee")
+  uploadedAttachments Attachment[] @relation("AttachmentUploader")
+  activityLogs ActivityLog[] @relation("ActivityActor")
+  accounts Account[]
+  sessions Session[]
+}
+
+model Policy {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title           String
+  category        String
+  ownerUserId     String
+  owner           User          @relation(fields: [ownerUserId], references: [id])
+  status          PolicyStatus  @default(DRAFT)
+  currentVersionId String?
+  currentVersion  PolicyVersion? @relation("CurrentPolicyVersion", fields: [currentVersionId], references: [id])
+  versions        PolicyVersion[] @relation("PolicyVersions")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([workspaceId, status])
+}
+
+model PolicyVersion {
+  id              String      @id @default(cuid())
+  policyId        String
+  policy          Policy      @relation("PolicyVersions", fields: [policyId], references: [id], onDelete: Cascade)
+  versionLabel    String
+  effectiveDate   DateTime?
+  reviewDueDate   DateTime?
+  contentMarkdown String?
+  fileUrl         String?
+  changeSummary   String?
+  status          PolicyStatus @default(DRAFT)
+  createdByUserId String
+  createdBy       User        @relation("PolicyVersionAuthor", fields: [createdByUserId], references: [id])
+  approvedByUserId String?
+  approvedBy      User?       @relation("PolicyVersionApprover", fields: [approvedByUserId], references: [id])
+  approvedAt      DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  acknowledgements Acknowledgement[]
+}
+
+model Approval {
+  id               String         @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title            String
+  requestType      String
+  description      String?
+  relatedEntityType String?
+  relatedEntityId  String?
+  requesterUserId  String
+  requester        User           @relation("ApprovalRequester", fields: [requesterUserId], references: [id])
+  approverUserId   String
+  approver         User           @relation("ApprovalApprover", fields: [approverUserId], references: [id])
+  status           ApprovalStatus @default(PENDING)
+  submittedAt      DateTime       @default(now())
+  decidedAt        DateTime?
+  decisionNotes    String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([workspaceId, status])
+}
+
+model Acknowledgement {
+  id                 String                @id @default(cuid())
+  workspaceId        String
+  workspace          Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  policyVersionId    String
+  policyVersion      PolicyVersion         @relation(fields: [policyVersionId], references: [id], onDelete: Cascade)
+  assignedUserId     String
+  assignedUser       User                  @relation("AcknowledgementAssignee", fields: [assignedUserId], references: [id])
+  status             AcknowledgementStatus @default(PENDING)
+  acknowledgedAt     DateTime?
+  acknowledgementText String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@index([workspaceId, status])
+}
+
+model Incident {
+  id               String           @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title            String
+  category         String
+  severity         IncidentSeverity
+  description      String
+  dateDiscovered   DateTime
+  reporterUserId   String
+  reporter         User             @relation("IncidentReporter", fields: [reporterUserId], references: [id])
+  assigneeUserId   String?
+  assignee         User?            @relation("IncidentAssignee", fields: [assigneeUserId], references: [id])
+  status           IncidentStatus   @default(OPEN)
+  rootCause        String?
+  correctiveAction String?
+  closureNotes     String?
+  closedAt         DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([workspaceId, status, severity])
+}
+
+model Attachment {
+  id               String     @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entityType       String
+  entityId         String
+  fileName         String
+  fileUrl          String
+  mimeType         String
+  uploadedByUserId String
+  uploadedBy       User       @relation("AttachmentUploader", fields: [uploadedByUserId], references: [id])
+  createdAt        DateTime   @default(now())
+
+  @@index([workspaceId, entityType, entityId])
+}
+
+model ActivityLog {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actorUserId  String
+  actor        User      @relation("ActivityActor", fields: [actorUserId], references: [id])
+  action       String
+  entityType   String
+  entityId     String
+  metadataJson Json?
+  createdAt    DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@id([identifier, token])
+}
